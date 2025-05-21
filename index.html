@@ -106,6 +106,36 @@
             opacity: 0.7;
             z-index: 2;
         }
+        #ambienceMenu {
+            position: fixed;
+            bottom: 70px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 15px;
+            padding: 10px;
+            backdrop-filter: blur(5px);
+            z-index: 2;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #ambienceMenu button {
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+        #ambienceMenu button:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        #ambienceMenu button.active {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
         #ambienceToggle {
             position: fixed;
             bottom: 20px;
@@ -133,7 +163,13 @@
         <button id="modeToggle">Stress Relief (10Hz Alpha)</button>
         <button id="playButton">▶</button>
     </div>
-    <button id="ambienceToggle">🌊</button>
+    
+    <button id="ambienceToggle">🌿</button>
+    <div id="ambienceMenu">
+        <button data-sound="forest">🌲 Forest</button>
+        <button data-sound="ocean">🌊 Ocean</button>
+        <button data-sound="white">🌀 White Noise</button>
+    </div>
 
     <script>
         // ===== ENHANCED AUDIO ENGINE =====
@@ -143,7 +179,7 @@
                 this.currentMode = "stress";
                 this.isPlaying = false;
                 this.sessionStart = 0;
-                this.ambienceEnabled = false;
+                this.currentAmbience = null;
                 
                 // Base frequencies with intensity adjustment range
                 this.baseFrequencies = {
@@ -169,11 +205,18 @@
                 this.masterGain = this.audioContext.createGain();
                 this.masterGain.gain.value = 0;
                 
-                // Ambience nodes
+                // Ambience system
                 this.ambienceGain = this.audioContext.createGain();
                 this.ambienceGain.gain.value = 0;
-                this.ambienceBuffer = null;
+                this.ambienceBuffers = {};
                 this.ambienceSource = null;
+                
+                // Sound URLs (high-quality, seamless loops)
+                this.ambienceUrls = {
+                    forest: 'https://assets.mixkit.co/sfx/preview/mixkit-rain-forest-loop-1246.mp3',
+                    ocean: 'https://assets.mixkit.co/sfx/preview/mixkit-waves-coming-to-shore-1864.mp3',
+                    white: 'https://assets.mixkit.co/sfx/preview/mixkit-wind-in-the-trees-1773.mp3'
+                };
                 
                 // Connect audio graph
                 this.oscillators.left.connect(this.merger, 0, 0);
@@ -181,6 +224,7 @@
                 this.merger.connect(this.panner);
                 this.panner.connect(this.masterGain);
                 this.masterGain.connect(this.audioContext.destination);
+                this.ambienceGain.connect(this.audioContext.destination);
                 
                 // Configure oscillators
                 this.oscillators.left.type = 'sine';
@@ -194,45 +238,49 @@
                 // Start spatial movement
                 this.startSpatialMovement();
                 
-                // Load ambience
-                this.loadAmbience();
+                // Load all ambience tracks
+                this.loadAllAmbience();
                 
                 // Initialize timer
                 this.updateTimer();
             }
             
-            async loadAmbience() {
-                try {
-                    const response = await fetch('https://assets.mixkit.co/active_storage/sfx/2593/2593-preview.mp3');
-                    const arrayBuffer = await response.arrayBuffer();
-                    this.ambienceBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-                } catch (e) {
-                    console.warn("Couldn't load ambience track:", e);
+            async loadAllAmbience() {
+                for (const [name, url] of Object.entries(this.ambienceUrls)) {
+                    try {
+                        const response = await fetch(url);
+                        const arrayBuffer = await response.arrayBuffer();
+                        this.ambienceBuffers[name] = await this.audioContext.decodeAudioData(arrayBuffer);
+                    } catch (e) {
+                        console.warn(`Failed to load ${name} ambience:`, e);
+                    }
                 }
             }
             
-            toggleAmbience() {
-                this.ambienceEnabled = !this.ambienceEnabled;
+            setAmbience(type) {
+                const now = this.audioContext.currentTime;
                 
-                if (this.ambienceEnabled && this.ambienceBuffer) {
-                    if (this.ambienceSource) {
-                        this.ambienceSource.stop();
-                    }
-                    this.ambienceSource = this.audioContext.createBufferSource();
-                    this.ambienceSource.buffer = this.ambienceBuffer;
-                    this.ambienceSource.loop = true;
-                    this.ambienceSource.connect(this.ambienceGain);
-                    this.ambienceGain.connect(this.audioContext.destination);
-                    this.ambienceSource.start();
-                    
-                    // Smooth fade in
-                    this.ambienceGain.gain.setTargetAtTime(0.15, this.audioContext.currentTime, 1.0);
-                } else {
-                    // Smooth fade out
-                    this.ambienceGain.gain.setTargetAtTime(0, this.audioContext.currentTime, 1.0);
+                // Fade out current ambience
+                if (this.ambienceSource) {
+                    this.ambienceGain.gain.setTargetAtTime(0, now, 0.5);
+                    this.ambienceSource.stop(now + 0.5);
                 }
                 
-                return this.ambienceEnabled;
+                // Start new ambience if selected
+                if (type && this.ambienceBuffers[type]) {
+                    this.currentAmbience = type;
+                    this.ambienceSource = this.audioContext.createBufferSource();
+                    this.ambienceSource.buffer = this.ambienceBuffers[type];
+                    this.ambienceSource.loop = true;
+                    this.ambienceSource.connect(this.ambienceGain);
+                    
+                    // Smooth fade in
+                    this.ambienceGain.gain.setValueAtTime(0, now);
+                    this.ambienceGain.gain.setTargetAtTime(0.1, now, 1.5); // 10% volume
+                    this.ambienceSource.start(now);
+                } else {
+                    this.currentAmbience = null;
+                }
             }
             
             // Smooth frequency transitions
@@ -259,7 +307,7 @@
                 return this.currentMode;
             }
             
-            // Organic 8D motion with intensity parameter
+            // Organic 8D motion
             startSpatialMovement() {
                 let angle = 0;
                 let radius = 3.0;
@@ -279,11 +327,6 @@
                 };
                 
                 moveSound();
-                
-                // Return function to adjust intensity
-                return (newIntensity) => {
-                    intensity = newIntensity;
-                };
             }
             
             async togglePlayback() {
@@ -339,6 +382,9 @@
                 if (active) {
                     const scale = 0.8 + 0.2 * Math.sin(this.audioContext.currentTime * (this.currentMode === 'stress' ? 10 : 6));
                     statusBar.style.transform = `scaleX(${scale})`;
+                    statusBar.style.background = this.currentMode === 'stress' 
+                        ? 'linear-gradient(90deg, #4fc3f7, #7b1fa2)'
+                        : 'linear-gradient(90deg, #7b1fa2, #e91e63)';
                     requestAnimationFrame(() => this.updateStatusBar(true));
                 } else {
                     statusBar.style.transform = 'scaleX(0)';
@@ -346,7 +392,7 @@
             }
         }
 
-        // ===== ENHANCED PARTICLE VISUALIZER =====
+        // ===== PARTICLE VISUALIZER =====
         class ParticleVisualizer {
             constructor(container) {
                 this.container = container;
@@ -561,6 +607,7 @@
             const playButton = document.getElementById('playButton');
             const modeToggle = document.getElementById('modeToggle');
             const ambienceToggle = document.getElementById('ambienceToggle');
+            const ambienceMenu = document.getElementById('ambienceMenu');
             const controls = document.getElementById('controls');
             
             // Initialize systems
@@ -574,10 +621,6 @@
                 
                 if (isPlaying) {
                     audioTherapy.updateStatusBar(true);
-                    document.getElementById('statusBar').style.background = 
-                        audioTherapy.currentMode === 'stress' 
-                            ? 'linear-gradient(90deg, #4fc3f7, #7b1fa2)'
-                            : 'linear-gradient(90deg, #7b1fa2, #e91e63)';
                 }
             });
             
@@ -590,25 +633,42 @@
                 
                 visualizer.setMode(newMode);
                 
-                if (audioTherapy.isPlaying) {
-                    document.getElementById('statusBar').style.background = 
-                        newMode === 'stress' 
-                            ? 'linear-gradient(90deg, #4fc3f7, #7b1fa2)'
-                            : 'linear-gradient(90deg, #7b1fa2, #e91e63)';
-                }
-                
                 // Haptic feedback on mobile
                 if ('vibrate' in navigator) {
                     navigator.vibrate(10);
                 }
             });
             
-            // Ambience toggle
-            ambienceToggle.addEventListener('click', () => {
-                const enabled = audioTherapy.toggleAmbience();
-                ambienceToggle.style.background = enabled 
-                    ? 'rgba(255, 255, 255, 0.3)'
-                    : 'rgba(255, 255, 255, 0.1)';
+            // Ambience menu toggle
+            ambienceToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                ambienceMenu.style.display = ambienceMenu.style.display === 'flex' ? 'none' : 'flex';
+            });
+            
+            // Ambience selection
+            ambienceMenu.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Set active state
+                    ambienceMenu.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    
+                    // Change ambience
+                    const soundType = btn.dataset.sound;
+                    audioTherapy.setAmbience(soundType);
+                    
+                    // Update toggle icon
+                    ambienceToggle.textContent = 
+                        soundType === 'forest' ? '🌲' :
+                        soundType === 'ocean' ? '🌊' : '🌀';
+                    
+                    // Close menu after selection
+                    ambienceMenu.style.display = 'none';
+                });
+            });
+            
+            // Close ambience menu when clicking elsewhere
+            document.addEventListener('click', () => {
+                ambienceMenu.style.display = 'none';
             });
             
             // Fullscreen on double tap
@@ -659,14 +719,6 @@
             document.addEventListener('mousemove', resetHideTimeout);
             document.addEventListener('touchmove', resetHideTimeout);
             resetHideTimeout();
-            
-            // Handle visibility changes
-            document.addEventListener('visibilitychange', () => {
-                if (document.hidden && audioTherapy.isPlaying) {
-                    audioTherapy.masterGain.gain.setTargetAtTime(0, audioTherapy.audioContext.currentTime, 0.5);
-                    playButton.textContent = '▶';
-                }
-            });
         });
     </script>
 </body>
