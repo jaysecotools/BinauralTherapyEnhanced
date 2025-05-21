@@ -276,7 +276,7 @@
                     
                     // Smooth fade in
                     this.ambienceGain.gain.setValueAtTime(0, now);
-                    this.ambienceGain.gain.setTargetAtTime(0.1, now, 1.5); // 10% volume
+                    this.ambienceGain.gain.setTargetAtTime(0.5, now, 1.5); // 10% volume
                     this.ambienceSource.start(now);
                 } else {
                     this.currentAmbience = null;
