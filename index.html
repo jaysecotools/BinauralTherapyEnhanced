@@ -128,6 +128,7 @@
             cursor: pointer;
             transition: all 0.2s;
             font-size: 14px;
+            text-align: left;
         }
         #ambienceMenu button:hover {
             background: rgba(255, 255, 255, 0.1);
@@ -166,13 +167,14 @@
     
     <button id="ambienceToggle">🌿</button>
     <div id="ambienceMenu">
+        <button data-sound="off" class="active">🔇 Off</button>
         <button data-sound="forest">🌲 Forest</button>
         <button data-sound="ocean">🌊 Ocean</button>
         <button data-sound="white">🌀 White Noise</button>
     </div>
 
     <script>
-        // ===== ENHANCED AUDIO ENGINE =====
+        // ===== AUDIO ENGINE =====
         class BinauralTherapy {
             constructor() {
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -181,7 +183,7 @@
                 this.sessionStart = 0;
                 this.currentAmbience = null;
                 
-                // Base frequencies with intensity adjustment range
+                // Base frequencies
                 this.baseFrequencies = {
                     stress: { left: 200, right: 210 }, // 10Hz Alpha
                     anxiety: { left: 180, right: 186 }  // 6Hz Theta
@@ -201,7 +203,7 @@
                     right: this.audioContext.createOscillator()
                 };
                 
-                // Master gain with smoother fade
+                // Master gain
                 this.masterGain = this.audioContext.createGain();
                 this.masterGain.gain.value = 0;
                 
@@ -211,7 +213,7 @@
                 this.ambienceBuffers = {};
                 this.ambienceSource = null;
                 
-                // Sound URLs (high-quality, seamless loops)
+                // Reliable sound sources (tested)
                 this.ambienceUrls = {
                     forest: 'https://assets.mixkit.co/sfx/preview/mixkit-rain-forest-loop-1246.mp3',
                     ocean: 'https://assets.mixkit.co/sfx/preview/mixkit-waves-coming-to-shore-1864.mp3',
@@ -248,11 +250,15 @@
             async loadAllAmbience() {
                 for (const [name, url] of Object.entries(this.ambienceUrls)) {
                     try {
+                        console.log(`Loading ${name} ambience...`);
                         const response = await fetch(url);
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
                         const arrayBuffer = await response.arrayBuffer();
                         this.ambienceBuffers[name] = await this.audioContext.decodeAudioData(arrayBuffer);
+                        console.log(`${name} ambience loaded successfully!`);
                     } catch (e) {
-                        console.warn(`Failed to load ${name} ambience:`, e);
+                        console.error(`Failed to load ${name} ambience:`, e);
+                        document.querySelector(`button[data-sound="${name}"]`).style.display = 'none';
                     }
                 }
             }
@@ -260,30 +266,31 @@
             setAmbience(type) {
                 const now = this.audioContext.currentTime;
                 
-                // Fade out current ambience
+                // Stop current ambience
                 if (this.ambienceSource) {
                     this.ambienceGain.gain.setTargetAtTime(0, now, 0.5);
                     this.ambienceSource.stop(now + 0.5);
+                    this.ambienceSource = null;
                 }
                 
-                // Start new ambience if selected
-                if (type && this.ambienceBuffers[type]) {
+                // Start new ambience if not "off"
+                if (type && type !== "off" && this.ambienceBuffers[type]) {
                     this.currentAmbience = type;
                     this.ambienceSource = this.audioContext.createBufferSource();
                     this.ambienceSource.buffer = this.ambienceBuffers[type];
                     this.ambienceSource.loop = true;
                     this.ambienceSource.connect(this.ambienceGain);
                     
-                    // Smooth fade in
-                    this.ambienceGain.gain.setValueAtTime(0, now);
-                    this.ambienceGain.gain.setTargetAtTime(0.1, now, 1.5); // 10% volume
+                    // Start at 50% volume (adjust the 0.5 to 0.2 later if too loud)
+                    this.ambienceGain.gain.setValueAtTime(0.5, now);
                     this.ambienceSource.start(now);
+                    console.log(`Playing ${type} ambience`);
                 } else {
                     this.currentAmbience = null;
+                    console.log("Ambience turned off");
                 }
             }
             
-            // Smooth frequency transitions
             setFrequency(intensity = 0) {
                 const now = this.audioContext.currentTime;
                 const freq = this.baseFrequencies[this.currentMode];
@@ -307,7 +314,6 @@
                 return this.currentMode;
             }
             
-            // Organic 8D motion
             startSpatialMovement() {
                 let angle = 0;
                 let radius = 3.0;
@@ -376,7 +382,6 @@
                 update();
             }
             
-            // Visual feedback for audio activity
             updateStatusBar(active) {
                 const statusBar = document.getElementById('statusBar');
                 if (active) {
@@ -602,7 +607,7 @@
         }
 
         // ===== MAIN APP =====
-        document.addEventListener('DOMContentLoaded', async () => {
+        document.addEventListener('DOMContentLoaded', () => {
             const container = document.getElementById('canvas');
             const playButton = document.getElementById('playButton');
             const modeToggle = document.getElementById('modeToggle');
@@ -618,10 +623,7 @@
             playButton.addEventListener('click', async () => {
                 const isPlaying = await audioTherapy.togglePlayback();
                 playButton.textContent = isPlaying ? '❚❚' : '▶';
-                
-                if (isPlaying) {
-                    audioTherapy.updateStatusBar(true);
-                }
+                if (isPlaying) audioTherapy.updateStatusBar(true);
             });
             
             // Toggle modes
@@ -630,13 +632,8 @@
                 modeToggle.textContent = newMode === "stress" 
                     ? "Stress Relief (10Hz Alpha)" 
                     : "Anxiety Relief (6Hz Theta)";
-                
                 visualizer.setMode(newMode);
-                
-                // Haptic feedback on mobile
-                if ('vibrate' in navigator) {
-                    navigator.vibrate(10);
-                }
+                if ('vibrate' in navigator) navigator.vibrate(10);
             });
             
             // Ambience menu toggle
@@ -648,7 +645,7 @@
             // Ambience selection
             ambienceMenu.querySelectorAll('button').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    // Set active state
+                    // Update UI
                     ambienceMenu.querySelectorAll('button').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     
@@ -658,10 +655,10 @@
                     
                     // Update toggle icon
                     ambienceToggle.textContent = 
+                        soundType === 'off' ? '🔇' :
                         soundType === 'forest' ? '🌲' :
                         soundType === 'ocean' ? '🌊' : '🌀';
                     
-                    // Close menu after selection
                     ambienceMenu.style.display = 'none';
                 });
             });
